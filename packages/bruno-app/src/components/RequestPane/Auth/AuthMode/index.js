@@ -38,10 +38,10 @@ const AuthMode = ({ item, collection }) => {
             className="dropdown-item"
             onClick={() => {
               dropdownTippyRef?.current?.hide();
-              onModeChange('awsv4');
+              onModeChange('bearer');
             }}
           >
-            AWS Sig v4
+            Bearer Token
           </div>
           <div
             className="dropdown-item"
@@ -56,10 +56,28 @@ const AuthMode = ({ item, collection }) => {
             className="dropdown-item"
             onClick={() => {
               dropdownTippyRef?.current?.hide();
-              onModeChange('bearer');
+              onModeChange('apikey');
             }}
           >
-            Bearer Token
+            API Key
+          </div>
+          <div
+            className="dropdown-item"
+            onClick={() => {
+              dropdownTippyRef?.current?.hide();
+              onModeChange('oauth2');
+            }}
+          >
+            OAuth 2.0
+          </div>
+          <div
+            className="dropdown-item"
+            onClick={() => {
+              dropdownTippyRef?.current?.hide();
+              onModeChange('awsv4');
+            }}
+          >
+            AWS Sig v4
           </div>
           <div
             className="dropdown-item"
@@ -83,28 +101,10 @@ const AuthMode = ({ item, collection }) => {
             className="dropdown-item"
             onClick={() => {
               dropdownTippyRef?.current?.hide();
-              onModeChange('oauth2');
-            }}
-          >
-            OAuth 2.0
-          </div>
-          <div
-            className="dropdown-item"
-            onClick={() => {
-              dropdownTippyRef?.current?.hide();
               onModeChange('wsse');
             }}
           >
             WSSE Auth
-          </div>
-          <div
-            className="dropdown-item"
-            onClick={() => {
-              dropdownTippyRef?.current?.hide();
-              onModeChange('apikey');
-            }}
-          >
-            API Key
           </div>
           <div
             className="dropdown-item"

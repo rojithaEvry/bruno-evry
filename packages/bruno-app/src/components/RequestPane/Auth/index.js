@@ -72,7 +72,7 @@ const Auth = ({ item, collection }) => {
       }
       case 'ntlm': {
         return <NTLMAuth collection={collection} item={item} />;
-      }      
+      }
       case 'oauth2': {
         return <OAuth2 collection={collection} item={item} />;
       }

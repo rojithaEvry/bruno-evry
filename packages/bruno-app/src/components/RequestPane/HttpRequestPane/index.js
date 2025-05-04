@@ -28,7 +28,7 @@ const ContentIndicator = () => {
 const ErrorIndicator = () => {
   return (
     <sup className="ml-[.125rem] opacity-80 font-medium text-red-500">
-      <DotIcon width="10" ></DotIcon>
+      <DotIcon width="10"></DotIcon>
     </sup>
   );
 };
@@ -151,11 +151,12 @@ const HttpRequestPane = ({ item, collection, leftPaneWidth }) => {
         </div>
         <div className={getTabClassname('script')} role="tab" onClick={() => selectTab('script')}>
           Script
-          {(script.req || script.res) && (
-            item.preRequestScriptErrorMessage || item.postResponseScriptErrorMessage ? 
-            <ErrorIndicator /> : 
-            <ContentIndicator />
-          )}
+          {(script.req || script.res) &&
+            (item.preRequestScriptErrorMessage || item.postResponseScriptErrorMessage ? (
+              <ErrorIndicator />
+            ) : (
+              <ContentIndicator />
+            ))}
         </div>
         <div className={getTabClassname('assert')} role="tab" onClick={() => selectTab('assert')}>
           Assert
