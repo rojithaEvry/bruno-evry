@@ -7,8 +7,9 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
   invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
   // Expose on for receiving messages from main
   on: (channel, handler) => {
-    // Deliberately strip event as it includes `sender`
-    const subscription = (event, ...args) => handler(...args);
+    // The original handler expects (event, ...payloadArgs)
+    // We need to pass all payloadArgs to the renderer's handler
+    const subscription = (event, ...payloadArgs) => handler(...payloadArgs);
     ipcRenderer.on(channel, subscription);
 
     // Return a cleanup function conforming to the expected pattern

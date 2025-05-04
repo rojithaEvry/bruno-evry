@@ -36,6 +36,9 @@ const registerNotificationsIpc = require('./ipc/notifications');
 const registerGlobalEnvironmentsIpc = require('./ipc/global-environments');
 const { safeParseJSON, safeStringifyJSON } = require('./utils/common');
 
+// Import the new LLM IPC handler
+const registerLlmIpc = require('./ipc/llm');
+
 const lastOpenedCollections = new LastOpenedCollections();
 
 // Reference: https://content-security-policy.com/
@@ -194,6 +197,9 @@ app.on('ready', async () => {
   registerCollectionsIpc(mainWindow, watcher, lastOpenedCollections);
   registerPreferencesIpc(mainWindow, watcher, lastOpenedCollections);
   registerNotificationsIpc(mainWindow, watcher);
+
+  // Register the LLM IPC handler
+  registerLlmIpc(mainWindow);
 
   // Add MS Auth IPC Handler (Moved inside app.on('ready'))
   // Reads config from process.env now, removed config param from handler
