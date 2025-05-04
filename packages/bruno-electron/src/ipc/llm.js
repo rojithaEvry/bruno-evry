@@ -287,6 +287,8 @@ const registerLlmIpc = (mainWindow) => {
 
       if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
         console.log('File selection canceled.');
+        // Notify the renderer that the process was cancelled
+        event.sender.send('generate-requests-cancelled');
         return;
       }
 
@@ -301,13 +303,27 @@ const registerLlmIpc = (mainWindow) => {
       event.sender.send('generate-requests-result', {
         success: true,
         interim: true,
-        message: 'Controller file read successfully. Processing with AI...'
+        message: 'Processing with AI...'
       });
 
       try {
+        // Send status before calling LLM
+        event.sender.send('generate-requests-result', {
+          success: true,
+          interim: true,
+          message: 'Calling AI model...'
+        });
+
         // Call LLM API to parse controller and generate Bruno requests
         const endpoints = await callLlmApi(fileContent);
         console.log(`LLM generated ${endpoints.length} endpoints`);
+
+        // Send status before saving files
+        event.sender.send('generate-requests-result', {
+          success: true,
+          interim: true,
+          message: 'Saving generated requests...'
+        });
 
         // Save the generated files to the collection, passing event.sender
         const savedFiles = await saveGeneratedFiles(endpoints, collectionUid, controllerFileName, event.sender);

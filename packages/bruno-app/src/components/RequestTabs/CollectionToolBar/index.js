@@ -1,6 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { uuid } from 'utils/common';
-import { IconFiles, IconRun, IconEye, IconSettings, IconKey, IconCodePlus } from '@tabler/icons';
+import { IconFiles, IconRun, IconEye, IconSettings, IconKey, IconCodePlus, IconLoader } from '@tabler/icons';
 import toast from 'react-hot-toast';
 import EnvironmentSelector from 'components/Environments/EnvironmentSelector';
 import GlobalEnvironmentSelector from 'components/GlobalEnvironments/EnvironmentSelector';
@@ -15,6 +15,8 @@ import path from 'path';
 
 const CollectionToolBar = ({ collection }) => {
   const dispatch = useDispatch();
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatingStatus, setGeneratingStatus] = useState('');
 
   useEffect(() => {
     const { ipcRenderer } = window;
@@ -68,8 +70,13 @@ const CollectionToolBar = ({ collection }) => {
       if (result.interim) {
         // This is an interim update
         toast.success(result.message || 'Processing controller...');
+        setGeneratingStatus(result.message || 'Processing...');
+        setIsGenerating(true);
         return;
       }
+
+      setGeneratingStatus('');
+      setIsGenerating(false);
 
       if (result.success) {
         const savedCount = result.endpoints?.filter((e) => e.saved).length || 0;
@@ -159,6 +166,17 @@ const CollectionToolBar = ({ collection }) => {
     };
     const removeGetCollectionPathListener = ipcRenderer.on('main:get-collection-path', handleGetCollectionPath);
 
+    // Add listener for cancellation
+    const handleGenerateRequestsCancelled = () => {
+      console.log('Generate requests cancelled by user.');
+      setGeneratingStatus('');
+      setIsGenerating(false);
+    };
+    const removeGenerateCancelledListener = ipcRenderer.on(
+      'generate-requests-cancelled',
+      handleGenerateRequestsCancelled
+    );
+
     // Clean up listeners on component unmount by calling the returned functions
     return () => {
       if (removeTokenListener) {
@@ -174,6 +192,10 @@ const CollectionToolBar = ({ collection }) => {
       // Cleanup the collection path listener
       if (removeGetCollectionPathListener) {
         removeGetCollectionPathListener();
+      }
+      // Cleanup the cancellation listener
+      if (removeGenerateCancelledListener) {
+        removeGenerateCancelledListener();
       }
     };
     // Add collection.uid to dependencies to ensure listener context is correct
@@ -220,6 +242,8 @@ const CollectionToolBar = ({ collection }) => {
     console.log('Requesting controller file selection...');
     // Log the collection UID being sent
     console.log('Sending generate request for collection UID:', collection?.uid);
+    setIsGenerating(true); // Start loading indicator
+    setGeneratingStatus('Selecting file...'); // Initial status
     const { ipcRenderer } = window;
     // Send message to main process to open file dialog and start the generation process
     ipcRenderer.send('generate-requests-from-controller', { collectionUid: collection.uid });
@@ -243,7 +267,14 @@ const CollectionToolBar = ({ collection }) => {
           </span>
           <span className="mr-3">
             <ToolHint text="Generate Requests from Controller" toolhintId="GenerateRequestsToolhintId" place="bottom">
-              <IconCodePlus className="cursor-pointer" size={18} strokeWidth={1.5} onClick={handleGenerateRequests} />
+              {isGenerating ? (
+                <div className="flex items-center">
+                  <IconLoader size={18} strokeWidth={1.5} className="animate-spin" />
+                  {generatingStatus && <span className="ml-2 text-xs text-gray-500">{generatingStatus}</span>}
+                </div>
+              ) : (
+                <IconCodePlus className="cursor-pointer" size={18} strokeWidth={1.5} onClick={handleGenerateRequests} />
+              )}
             </ToolHint>
           </span>
           <span className="mr-3">
