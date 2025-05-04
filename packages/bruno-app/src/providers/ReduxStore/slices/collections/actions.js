@@ -852,10 +852,7 @@ export const newHttpRequest = (params) => (dispatch, getState) => {
           file: null
         },
         auth: auth ?? {
-          mode: 'bearer',
-          bearer: {
-            token: ''
-          }
+          mode: 'inherit'
         }
       }
     };
