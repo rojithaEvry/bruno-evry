@@ -12,22 +12,26 @@ import ToolHint from 'components/ToolHint';
 import StyledWrapper from './StyledWrapper';
 import JsSandboxMode from 'components/SecuritySettings/JsSandboxMode';
 import path from 'path';
+import AuthDialog from 'components/AuthDialog';
 
 const CollectionToolBar = ({ collection }) => {
   const dispatch = useDispatch();
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingStatus, setGeneratingStatus] = useState('');
+  const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
 
   useEffect(() => {
     const { ipcRenderer } = window;
 
-    const handleTokenReceived = (token) => {
-      // Restore original logic now that IPC is working
+    const handleTokenReceived = (event, token) => {
+      // Improved token handling with better logging
       console.log('IPC ms-auth-token RECEIVED raw value:', token);
       console.log('IPC ms-auth-token RECEIVED typeof value:', typeof token);
 
-      if (token && typeof token === 'string') {
-        console.log('Access Token received from main process and validated:', token);
+      if (token && typeof token === 'string' && token.length > 0) {
+        console.log('Valid MS Auth token received from main process. Length:', token.length);
+        console.log('First 20 chars of token:', token.substring(0, 20) + '...');
+
         // Update collection auth mode to bearer and set the token
         dispatch(
           updateCollectionAuth({
@@ -232,10 +236,7 @@ const CollectionToolBar = ({ collection }) => {
   };
 
   const handleMsAuthLogin = () => {
-    console.log('Requesting MS Auth from main process (no payload needed)...');
-    const { ipcRenderer } = window;
-    // Send message to main process to initiate auth - no payload needed now
-    ipcRenderer.send('open-ms-auth');
+    setIsAuthDialogOpen(true);
   };
 
   const handleGenerateRequests = () => {
@@ -261,7 +262,7 @@ const CollectionToolBar = ({ collection }) => {
             <JsSandboxMode collection={collection} />
           </span>
           <span className="mr-3">
-            <ToolHint text="MS Auth Login" toolhintId="MSAuthLoginToolhintId" place="bottom">
+            <ToolHint text="Authentication Options" toolhintId="AuthOptionsToolhintId" place="bottom">
               <IconKey className="cursor-pointer" size={18} strokeWidth={1.5} onClick={handleMsAuthLogin} />
             </ToolHint>
           </span>
@@ -298,6 +299,10 @@ const CollectionToolBar = ({ collection }) => {
           <EnvironmentSelector collection={collection} />
         </div>
       </div>
+
+      {isAuthDialogOpen && (
+        <AuthDialog isOpen={isAuthDialogOpen} onClose={() => setIsAuthDialogOpen(false)} collection={collection} />
+      )}
     </StyledWrapper>
   );
 };

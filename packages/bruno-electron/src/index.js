@@ -44,7 +44,7 @@ const lastOpenedCollections = new LastOpenedCollections();
 // Reference: https://content-security-policy.com/
 const contentSecurityPolicy = [
   "default-src 'self'",
-  "connect-src 'self' https://*.posthog.com",
+  "connect-src 'self' https://*.posthog.com https://*.evryhealth.com",
   "font-src 'self' https: data:;",
   'frame-src data:',
   // this has been commented out to make oauth2 work
@@ -97,7 +97,9 @@ app.on('ready', async () => {
       nodeIntegration: true,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      webviewTag: true
+      webviewTag: true,
+      worldSafeExecuteJavaScript: true,
+      enableRemoteModule: false
     },
     title: 'Bruno',
     icon: path.join(__dirname, 'about/256x256.png')
@@ -201,6 +203,119 @@ app.on('ready', async () => {
   // Register the LLM IPC handler
   registerLlmIpc(mainWindow);
 
+  // Add handler for getting environment variables
+  ipcMain.on('get-environment-variables', (event) => {
+    console.log('Main process received request for environment variables');
+
+    const envVars = {
+      AUTH_ENVIRONMENT: process.env.AUTH_ENVIRONMENT || 'dev',
+      SYSTEM_ADMIN_EMAIL: process.env.SYSTEM_ADMIN_EMAIL || '',
+      SYSTEM_ADMIN_PASSWORD: process.env.SYSTEM_ADMIN_PASSWORD || '',
+      MEMBER_ADMIN_EMAIL: process.env.MEMBER_ADMIN_EMAIL || '',
+      MEMBER_ADMIN_PASSWORD: process.env.MEMBER_ADMIN_PASSWORD || ''
+    };
+
+    event.sender.send('environment-variables-response', envVars);
+  });
+
+  // Add handler for Evry Health Member Login
+  ipcMain.on('evry-member-login', async (event, data) => {
+    console.log('Main process received Evry Health Member login request');
+
+    try {
+      const baseUrl = data.environment === 'dev' ? 'https://apidev.evryhealth.com' : 'https://api.evryhealth.com';
+
+      // Make the API request from the main process
+      const axios = require('axios');
+      const response = await axios.post(
+        `${baseUrl}/api/v1/Member/Login`,
+        {
+          email_address: data.email,
+          password: data.password
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (response.data && response.data.access_token) {
+        console.log('Member login succeeded. Token received:', response.data.access_token);
+        console.log('Token length:', response.data.access_token.length);
+
+        // Try directly sending the token as a string
+        const token = response.data.access_token.toString();
+        console.log('Preparing to send token via IPC, type:', typeof token);
+
+        try {
+          // Send the token directly, not wrapped in an object
+          event.sender.send('evry-auth-token', token);
+          console.log('Token sent via IPC successfully');
+        } catch (error) {
+          console.error('Error sending token via IPC:', error);
+          event.sender.send('evry-auth-error', 'Error sending token: ' + error.message);
+        }
+      } else {
+        console.error('Member login: No access_token in response', response.data);
+        event.sender.send('evry-auth-error', 'Failed to get access token from Member login API');
+      }
+    } catch (error) {
+      console.error('Error during Member login:', error.message);
+      console.error('Full error:', error);
+      event.sender.send('evry-auth-error', error.message || 'Failed to authenticate');
+    }
+  });
+
+  // Add handler for Evry Health System Admin Login
+  ipcMain.on('evry-admin-login', async (event, data) => {
+    console.log('Main process received Evry Health System Admin login request');
+
+    try {
+      const baseUrl = data.environment === 'dev' ? 'https://apidev.evryhealth.com' : 'https://api.evryhealth.com';
+
+      // Make the API request from the main process
+      const axios = require('axios');
+      const response = await axios.post(
+        `${baseUrl}/api/v1/SystemAdmin/Login`,
+        {
+          email_address: data.email,
+          password: data.password
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (response.data && response.data.access_token) {
+        console.log('System Admin login succeeded. Token received:', response.data.access_token);
+        console.log('Token length:', response.data.access_token.length);
+
+        // Try directly sending the token as a string
+        const token = response.data.access_token.toString();
+        console.log('Preparing to send token via IPC, type:', typeof token);
+
+        try {
+          // Send the token directly, not wrapped in an object
+          event.sender.send('evry-auth-token', token);
+          console.log('Token sent via IPC successfully');
+        } catch (error) {
+          console.error('Error sending token via IPC:', error);
+          event.sender.send('evry-auth-error', 'Error sending token: ' + error.message);
+        }
+      } else {
+        console.error('System Admin login: No access_token in response', response.data);
+        event.sender.send('evry-auth-error', 'Failed to get access token from System Admin login API');
+      }
+    } catch (error) {
+      console.error('Error during System Admin login:', error.message);
+      console.error('Full error:', error);
+      event.sender.send('evry-auth-error', error.message || 'Failed to authenticate');
+    }
+  });
+
   // Add MS Auth IPC Handler (Moved inside app.on('ready'))
   // Reads config from process.env now, removed config param from handler
   ipcMain.on('open-ms-auth', async (event) => {
@@ -288,13 +403,12 @@ app.on('ready', async () => {
 
           if (accessToken) {
             console.log('Access Token extracted:', accessToken);
-            console.log(
-              `Attempting to send ms-auth-token with payload type: ${typeof accessToken}, length: ${
-                accessToken?.length
-              }`
-            );
+            console.log('Token length:', accessToken.length);
             try {
-              event.sender.send('ms-auth-token', accessToken);
+              // Ensure we're using the same format as our Evry handlers
+              console.log('Sending MS auth token in consistent format (string only)');
+              // Send token as the only argument - no wrapper object
+              event.sender.send('ms-auth-token', accessToken.toString());
               console.log('Successfully called event.sender.send for ms-auth-token');
             } catch (sendError) {
               console.error('Error calling event.sender.send for ms-auth-token:', sendError);
