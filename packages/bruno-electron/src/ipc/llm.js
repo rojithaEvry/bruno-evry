@@ -235,7 +235,7 @@ async function callVertexLlmApi(fileContent, systemPrompt) {
       config: {
         temperature: 0.1,
         topP: 0.8,
-        maxOutputTokens: 8000,
+        maxOutputTokens: 64000,
         thinkingConfig: {
           thinkingBudget: 0,
           includeThoughts: false
@@ -297,7 +297,7 @@ Your response must be valid JSON in the following format:
       "name": "Endpoint name", 
       "method": "GET|POST|PUT|DELETE|etc",
       "path": "Full relative path including route prefix",
-      "auth": "none|bearer|inherit",
+      "auth": "none|inherit",
       "contentType": "application/json|etc",
       "description": "Brief description of the endpoint",
       "bodyExample": "Example body or null if no body needed",
@@ -317,17 +317,13 @@ meta {
 
 get {
   url: {{baseUrl}}[PATH]
-  auth: none
+  auth: inherit
 }
 
 post {
   url: {{baseUrl}}[PATH]
   body: json
-  auth: bearer
-}
-
-auth:bearer {
-  token: {{token}}
+  auth: inherit
 }
 
 body:json {
@@ -338,7 +334,7 @@ RULES:
 1. Extract proper HTTP method from attributes like [HttpGet], [HttpPost], etc.
 2. HTTP methods in Bruno format MUST be lowercase (get, post, put, delete, etc.)
 3. Include the full route by combining the controller's [Route] attribute with the method's route.
-4. If [AllowAnonymous] is present, use "auth: none", otherwise use "auth: bearer". Include the bearer auth section if needed.
+4. If [AllowAnonymous] is present, use "auth: none", otherwise use "auth: inherit".
 5. For POST/PUT methods that accept a body, include a "body:json" section with the content from "bodyExample".
 6. Use {{baseUrl}} as the base URL variable in the request URL.
 7. Check for [Produces] attribute to determine content type (affects body section).
