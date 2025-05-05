@@ -3,24 +3,39 @@ const path = require('path');
 const axios = require('axios');
 const fs = require('fs/promises');
 const fsSync = require('fs');
+const { GoogleGenAI } = require('@google/genai');
 
-// Azure LLM configuration
-const azureConfig = {
-  endpoint: 'https://finetuned-model-euwyrqwq.southcentralus.models.ai.azure.com/v1/chat/completions',
-  apiKey: process.env.AZURE_API_KEY || ''
+// LLM Configuration
+const llmConfig = {
+  defaultProvider: 'vertex', // Can be 'azure', 'groq', or 'vertex'
+  azure: {
+    endpoint:
+      process.env.AZURE_LLM_ENDPOINT ||
+      'https://finetuned-model-euwyrqwq.southcentralus.models.ai.azure.com/v1/chat/completions',
+    apiKey: process.env.AZURE_API_KEY || ''
+  },
+  groq: {
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    apiKey: process.env.GROQ_API_KEY || '',
+    model: process.env.GROQ_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct' // Default Groq model, user-provided one seems experimental
+  },
+  vertex: {
+    projectId: process.env.GOOGLE_PROJECT_ID || '',
+    location: process.env.GOOGLE_LOCATION || 'us-east5',
+    model: process.env.GOOGLE_MODEL || 'meta/llama-4-maverick-17b-128e-instruct-maas'
+  }
 };
 
 /**
- * Call Azure LLM API to parse controller code and generate Bruno API requests
+ * Call Azure LLM API specific function
  * @param {string} fileContent - C# controller file content
+ * @param {string} systemPrompt - The system prompt
  * @returns {Promise<Array>} - Array of generated Bruno request file contents
  */
-async function callLlmApi(fileContent) {
-  if (!azureConfig.apiKey) {
+async function callAzureLlmApi(fileContent, systemPrompt) {
+  if (!llmConfig.azure.apiKey) {
     throw new Error('Azure API key not found. Please set AZURE_API_KEY in environment variables.');
   }
-
-  const systemPrompt = `You are an expert API parser that converts C# ASP.NET Core API controllers into Bruno API collection files.\\n\\nTASK:\\nAnalyze the C# controller code and extract each API endpoint. For each endpoint, create a Bruno API request file.\\n\\nIMPORTANT OUTPUT FORMAT:\\nYour response must be valid JSON in the following format:\\n{\\n  \"endpoints\": [\\n    {\\n      \"name\": \"Endpoint name\", \\n      \"method\": \"GET|POST|PUT|DELETE|etc\",\\n      \"path\": \"Full relative path including route prefix\",\\n      \"auth\": \"none|bearer|inherit\",\\n      \"contentType\": \"application/json|etc\",\\n      \"description\": \"Brief description of the endpoint\",\\n      \"bodyExample\": \"Example body or null if no body needed\",\\n      \"responseExample\": \"Example response based on return statement\",\\n      \"bruFile\": \"Complete Bruno file content for this endpoint (MUST BE TEXT, NOT JSON)\"\\n    }\\n  ]\\n}\\n\\nBRUNO FILE FORMAT FOR 'bruFile' FIELD:\\nEach 'bruFile' field MUST contain ONLY the raw text content matching this structure:\\n\\nmeta {\\n  name: [Endpoint Name]\\n  type: http\\n  seq: 1\\n}\\n\\nget {\\n  url: {{baseUrl}}[PATH]\\n  auth: none\\n}\\n\\npost {\\n  url: {{baseUrl}}[PATH]\\n  body: json\\n  auth: bearer\\n}\\n\\nauth:bearer {\\n  token: {{token}}\\n}\\n\\nbody:json {\\n  [BODY CONTENT]\\n}\\n\\nRULES:\\n1. Extract proper HTTP method from attributes like [HttpGet], [HttpPost], etc.\\n2. HTTP methods in Bruno format MUST be lowercase (get, post, put, delete, etc.)\\n3. Include the full route by combining the controller's [Route] attribute with the method's route.\\n4. If [AllowAnonymous] is present, use \"auth: none\", otherwise use \"auth: bearer\". Include the bearer auth section if needed.\\n5. For POST/PUT methods that accept a body, include a \"body:json\" section with the content from \"bodyExample\".\\n6. Use {{baseUrl}} as the base URL variable in the request URL.\\n7. Check for [Produces] attribute to determine content type (affects body section).\\n8. DO NOT use the markdown format with \\\`\\\`\\\` in the bruFile field.\\n\\nDO NOT wrap your response in markdown code blocks (like \\\`\\\`\\\`json). Return ONLY the raw JSON object described above.\\nTHE 'bruFile' FIELD MUST CONTAIN A STRING WITH THE BRUNO TEXT FORMAT, NOT A JSON STRING.`;
 
   const payload = {
     messages: [
@@ -35,22 +50,22 @@ async function callLlmApi(fileContent) {
     ],
     temperature: 0.1,
     top_p: 0.8,
-    top_k: 40,
-    max_tokens: 4000
+    top_k: 40, // Note: top_k might not be supported by all models/APIs
+    max_tokens: 60000 // Increased token limit for potentially large responses
   };
 
   try {
     console.log('Calling Azure LLM API...');
-    const response = await axios.post(azureConfig.endpoint, payload, {
+    const response = await axios.post(llmConfig.azure.endpoint, payload, {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${azureConfig.apiKey}`
+        Authorization: `Bearer ${llmConfig.azure.apiKey}`
       }
     });
 
     // Log response structure for debugging
     console.log(
-      'LLM API Response:',
+      'Azure LLM API Response Status:',
       JSON.stringify({
         status: response.status,
         hasChoices: !!response.data.choices,
@@ -58,52 +73,218 @@ async function callLlmApi(fileContent) {
       })
     );
 
-    if (!response.data.choices || response.data.choices.length === 0) {
-      throw new Error('Empty response from Azure LLM API');
+    if (!response.data.choices || response.data.choices.length === 0 || !response.data.choices[0].message) {
+      console.error('Invalid Azure response structure:', response.data);
+      throw new Error('Empty or invalid response from Azure LLM API');
     }
 
     let content = response.data.choices[0].message.content;
-
-    try {
-      // First, log the raw content for debugging
-      console.log('Raw content:', content);
-
-      // Check if content is wrapped in markdown code blocks and extract the JSON
-      if (content.trim().startsWith('```')) {
-        // Find the first ``` and the last ```
-        const startIndex = content.indexOf('{');
-        const endIndex = content.lastIndexOf('}');
-
-        if (startIndex !== -1 && endIndex !== -1) {
-          // Extract only the JSON part
-          content = content.substring(startIndex, endIndex + 1);
-        } else {
-          throw new Error('Could not extract JSON from markdown-formatted response');
-        }
-      }
-
-      // Attempt to parse as JSON
-      const parsed = JSON.parse(content);
-
-      if (!parsed.endpoints || !Array.isArray(parsed.endpoints)) {
-        throw new Error('Invalid response format: missing endpoints array');
-      }
-
-      return parsed.endpoints;
-    } catch (jsonError) {
-      console.error('Failed to parse LLM response as JSON:', jsonError);
-      console.error('Raw content:', content);
-      throw new Error('Failed to parse LLM response: ' + jsonError.message);
-    }
+    return parseLlmResponse(content, 'Azure'); // Use a helper for parsing
   } catch (error) {
-    console.error('Azure LLM API call failed:', error);
+    console.error('Azure LLM API call failed:', error.message);
     if (error.response) {
       console.error('Response status:', error.response.status);
       console.error('Response data:', error.response.data);
     }
-    throw new Error(`LLM API call failed: ${error.message}`);
+    throw new Error(`Azure LLM API call failed: ${error.message}`);
   }
 }
+
+/**
+ * Helper function to parse LLM response content (potentially JSON wrapped in markdown)
+ * @param {string} content - Raw content string from LLM response
+ * @param {string} providerName - Name of the provider for logging
+ * @returns {Promise<Array>} - Parsed endpoints array
+ */
+async function parseLlmResponse(content, providerName) {
+  try {
+    console.log(`Raw content from ${providerName}:`, content);
+
+    // Clean up the content before parsing
+    let cleanedContent = content.trim();
+
+    // Remove any prefixes like "Here is the JSON output:"
+    const jsonStartIndex = cleanedContent.indexOf('{');
+    if (jsonStartIndex > 0) {
+      console.log(`Removing prefix text from ${providerName} response...`);
+      cleanedContent = cleanedContent.substring(jsonStartIndex);
+    }
+
+    // Clean up markdown formatting (```json ... ```)
+    if (cleanedContent.includes('```')) {
+      console.log(`Removing markdown code blocks from ${providerName} response...`);
+      cleanedContent = cleanedContent.replace(/^```(?:json)?[\r\n]?/, '').replace(/[\r\n]?```$/, '');
+    }
+
+    // Attempt to find where the actual JSON ends (in case there's trailing text)
+    const lastBraceIndex = cleanedContent.lastIndexOf('}');
+    if (lastBraceIndex > 0 && lastBraceIndex < cleanedContent.length - 1) {
+      console.log(`Trimming trailing text after JSON from ${providerName} response...`);
+      cleanedContent = cleanedContent.substring(0, lastBraceIndex + 1);
+    }
+
+    // Attempt to parse as JSON
+    const parsed = JSON.parse(cleanedContent);
+
+    if (!parsed.endpoints || !Array.isArray(parsed.endpoints)) {
+      console.error(`Invalid response format from ${providerName}: missing endpoints array. Parsed:`, parsed);
+      throw new Error('Invalid response format: missing endpoints array');
+    }
+
+    return parsed.endpoints;
+  } catch (jsonError) {
+    console.error(`Failed to parse LLM response from ${providerName} as JSON:`, jsonError);
+    console.error('Original content received:', content);
+    throw new Error(`Failed to parse LLM response from ${providerName}: ${jsonError.message}`);
+  }
+}
+
+/**
+ * Call Groq LLM API specific function
+ * @param {string} fileContent - C# controller file content
+ * @param {string} systemPrompt - The system prompt
+ * @returns {Promise<Array>} - Array of generated Bruno request file contents
+ */
+async function callGroqLlmApi(fileContent, systemPrompt) {
+  if (!llmConfig.groq.apiKey) {
+    throw new Error('Groq API key not found. Please set GROQ_API_KEY in environment variables.');
+  }
+
+  const payload = {
+    model: llmConfig.groq.model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: fileContent }
+    ],
+    temperature: 0.1, // Matching Azure settings
+    max_tokens: 4000, // Matching Azure settings
+    top_p: 0.8 // Matching Azure settings
+    // stream: false, // Default
+    // stop: null // Default
+  };
+
+  try {
+    console.log(`Calling Groq LLM API (Model: ${llmConfig.groq.model})...`);
+    const response = await axios.post(llmConfig.groq.endpoint, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${llmConfig.groq.apiKey}`
+      }
+    });
+
+    // Log response structure for debugging
+    console.log(
+      'Groq LLM API Response Status:',
+      JSON.stringify({
+        status: response.status,
+        hasChoices: !!response.data.choices,
+        choiceCount: response.data.choices?.length
+      })
+    );
+
+    if (!response.data.choices || response.data.choices.length === 0 || !response.data.choices[0].message) {
+      console.error('Invalid Groq response structure:', response.data);
+      throw new Error('Empty or invalid response from Groq LLM API');
+    }
+
+    let content = response.data.choices[0].message.content;
+    return parseLlmResponse(content, 'Groq'); // Use the helper for parsing
+  } catch (error) {
+    console.error('Groq LLM API call failed:', error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+    }
+    throw new Error(`Groq LLM API call failed: ${error.message}`);
+  }
+}
+
+/**
+ * Call Google Vertex AI API specific function
+ * @param {string} fileContent - C# controller file content
+ * @param {string} systemPrompt - The system prompt
+ * @returns {Promise<Array>} - Array of generated Bruno request file contents
+ */
+async function callVertexLlmApi(fileContent, systemPrompt) {
+  if (!llmConfig.vertex.projectId) {
+    throw new Error('Google Project ID not found. Please set GOOGLE_PROJECT_ID in environment variables.');
+  }
+
+  try {
+    console.log(`Calling Google Vertex AI (Model: ${llmConfig.vertex.model})...`);
+
+    // Initialize the Google GenAI client
+    const genAI = new GoogleGenAI({
+      vertexai: true,
+      project: llmConfig.vertex.projectId,
+      location: llmConfig.vertex.location,
+      googleAuthOptions: {
+        credentials: process.env.GOOGLE_CREDENTIALS ? JSON.parse(process.env.GOOGLE_CREDENTIALS) : undefined
+      }
+    });
+
+    // Create content request with system prompt and user content
+    const response = await genAI.models.generateContent({
+      model: llmConfig.vertex.model,
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: `${systemPrompt}\n\nHere is the C# controller code to analyze:\n\n${fileContent}` }]
+        }
+      ],
+      config: {
+        temperature: 0.1,
+        topP: 0.8,
+        maxOutputTokens: 8000,
+        thinkingConfig: {
+          thinkingBudget: 0,
+          includeThoughts: false
+        },
+        responseModalities: ['TEXT']
+      }
+    });
+
+    // Extract and parse the response
+    console.log('Vertex AI response received.');
+
+    // Get the text response
+    const content = response.text;
+
+    // Parse the content
+    return parseLlmResponse(content, 'Vertex AI');
+  } catch (error) {
+    console.error('Google Vertex AI call failed:', error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+    }
+    throw new Error(`Google Vertex AI call failed: ${error.message}`);
+  }
+}
+
+/**
+ * Main dispatcher function to call the configured LLM provider
+ * @param {string} fileContent - C# controller file content
+ * @returns {Promise<Array>} - Array of generated Bruno request file contents
+ */
+async function callLlmApi(fileContent) {
+  const provider = llmConfig.defaultProvider;
+  console.log(`Using LLM provider: ${provider}`);
+
+  switch (provider) {
+    case 'azure':
+      return callAzureLlmApi(fileContent, systemPrompt);
+    case 'groq':
+      return callGroqLlmApi(fileContent, systemPrompt);
+    case 'vertex':
+      return callVertexLlmApi(fileContent, systemPrompt);
+    default:
+      throw new Error(`Unsupported LLM provider configured: ${provider}`);
+  }
+}
+
+// System prompt remains the same for both providers for now
+const systemPrompt = `You are an expert API parser that converts C# ASP.NET Core API controllers into Bruno API collection files.\\n\\nTASK:\\nAnalyze the C# controller code and extract each API endpoint. For each endpoint, create a Bruno API request file.\\n\\nIMPORTANT OUTPUT FORMAT:\\nYour response must be valid JSON in the following format:\\n{\\n  \"endpoints\": [\\n    {\\n      \"name\": \"Endpoint name\", \\n      \"method\": \"GET|POST|PUT|DELETE|etc\",\\n      \"path\": \"Full relative path including route prefix\",\\n      \"auth\": \"none|bearer|inherit\",\\n      \"contentType\": \"application/json|etc\",\\n      \"description\": \"Brief description of the endpoint\",\\n      \"bodyExample\": \"Example body or null if no body needed\",\\n      \"responseExample\": \"Example response based on return statement\",\\n      \"bruFile\": \"Complete Bruno file content for this endpoint (MUST BE TEXT, NOT JSON)\"\\n    }\\n  ]\\n}\\n\\nBRUNO FILE FORMAT FOR 'bruFile' FIELD:\\nEach 'bruFile' field MUST contain ONLY the raw text content matching this structure:\\n\\nmeta {\\n  name: [Endpoint Name]\\n  type: http\\n  seq: 1\\n}\\n\\nget {\\n  url: {{baseUrl}}[PATH]\\n  auth: none\\n}\\n\\npost {\\n  url: {{baseUrl}}[PATH]\\n  body: json\\n  auth: bearer\\n}\\n\\nauth:bearer {\\n  token: {{token}}\\n}\\n\\nbody:json {\\n  [BODY CONTENT]\\n}\\n\\nRULES:\\n1. Extract proper HTTP method from attributes like [HttpGet], [HttpPost], etc.\\n2. HTTP methods in Bruno format MUST be lowercase (get, post, put, delete, etc.)\\n3. Include the full route by combining the controller's [Route] attribute with the method's route.\\n4. If [AllowAnonymous] is present, use \"auth: none\", otherwise use \"auth: bearer\". Include the bearer auth section if needed.\\n5. For POST/PUT methods that accept a body, include a \"body:json\" section with the content from \"bodyExample\".\\n6. Use {{baseUrl}} as the base URL variable in the request URL.\\n7. Check for [Produces] attribute to determine content type (affects body section).\\n8. DO NOT use the markdown format with \\\`\\\`\\\` in the bruFile field.\\n\\nABSOLUTELY DO NOT wrap your response in markdown code blocks (like \\\`\\\`\\\`json).\\nReturn ONLY the raw JSON object. Do not include ANY introductory text, preamble, or explanation like \"Here is the JSON output:\". Your response must start directly with \"{\" and end directly with \"}\".\\nTHE \'bruFile\' FIELD MUST CONTAIN A STRING WITH THE BRUNO TEXT FORMAT, NOT A JSON STRING. DO NOT INCLUDE ANYTHING OTHER THAN THE JSON OUTPUT.`;
 
 /**
  * Save generated Bruno request files to the collection
@@ -307,13 +488,6 @@ const registerLlmIpc = (mainWindow) => {
       });
 
       try {
-        // Send status before calling LLM
-        event.sender.send('generate-requests-result', {
-          success: true,
-          interim: true,
-          message: 'Calling AI model...'
-        });
-
         // Call LLM API to parse controller and generate Bruno requests
         const endpoints = await callLlmApi(fileContent);
         console.log(`LLM generated ${endpoints.length} endpoints`);
