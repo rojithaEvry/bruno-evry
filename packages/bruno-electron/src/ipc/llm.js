@@ -51,7 +51,7 @@ async function callAzureLlmApi(fileContent, systemPrompt) {
     temperature: 0.1,
     top_p: 0.8,
     top_k: 40, // Note: top_k might not be supported by all models/APIs
-    max_tokens: 60000 // Increased token limit for potentially large responses
+    max_tokens: 64000 // Increased token limit for potentially large responses
   };
 
   try {
@@ -284,7 +284,70 @@ async function callLlmApi(fileContent) {
 }
 
 // System prompt remains the same for both providers for now
-const systemPrompt = `You are an expert API parser that converts C# ASP.NET Core API controllers into Bruno API collection files.\\n\\nTASK:\\nAnalyze the C# controller code and extract each API endpoint. For each endpoint, create a Bruno API request file.\\n\\nIMPORTANT OUTPUT FORMAT:\\nYour response must be valid JSON in the following format:\\n{\\n  \"endpoints\": [\\n    {\\n      \"name\": \"Endpoint name\", \\n      \"method\": \"GET|POST|PUT|DELETE|etc\",\\n      \"path\": \"Full relative path including route prefix\",\\n      \"auth\": \"none|bearer|inherit\",\\n      \"contentType\": \"application/json|etc\",\\n      \"description\": \"Brief description of the endpoint\",\\n      \"bodyExample\": \"Example body or null if no body needed\",\\n      \"responseExample\": \"Example response based on return statement\",\\n      \"bruFile\": \"Complete Bruno file content for this endpoint (MUST BE TEXT, NOT JSON)\"\\n    }\\n  ]\\n}\\n\\nBRUNO FILE FORMAT FOR 'bruFile' FIELD:\\nEach 'bruFile' field MUST contain ONLY the raw text content matching this structure:\\n\\nmeta {\\n  name: [Endpoint Name]\\n  type: http\\n  seq: 1\\n}\\n\\nget {\\n  url: {{baseUrl}}[PATH]\\n  auth: none\\n}\\n\\npost {\\n  url: {{baseUrl}}[PATH]\\n  body: json\\n  auth: bearer\\n}\\n\\nauth:bearer {\\n  token: {{token}}\\n}\\n\\nbody:json {\\n  [BODY CONTENT]\\n}\\n\\nRULES:\\n1. Extract proper HTTP method from attributes like [HttpGet], [HttpPost], etc.\\n2. HTTP methods in Bruno format MUST be lowercase (get, post, put, delete, etc.)\\n3. Include the full route by combining the controller's [Route] attribute with the method's route.\\n4. If [AllowAnonymous] is present, use \"auth: none\", otherwise use \"auth: bearer\". Include the bearer auth section if needed.\\n5. For POST/PUT methods that accept a body, include a \"body:json\" section with the content from \"bodyExample\".\\n6. Use {{baseUrl}} as the base URL variable in the request URL.\\n7. Check for [Produces] attribute to determine content type (affects body section).\\n8. DO NOT use the markdown format with \\\`\\\`\\\` in the bruFile field.\\n\\nABSOLUTELY DO NOT wrap your response in markdown code blocks (like \\\`\\\`\\\`json).\\nReturn ONLY the raw JSON object. Do not include ANY introductory text, preamble, or explanation like \"Here is the JSON output:\". Your response must start directly with \"{\" and end directly with \"}\".\\nTHE \'bruFile\' FIELD MUST CONTAIN A STRING WITH THE BRUNO TEXT FORMAT, NOT A JSON STRING. DO NOT INCLUDE ANYTHING OTHER THAN THE JSON OUTPUT.`;
+const systemPrompt = `You are an expert API parser that converts C# ASP.NET Core API controllers into Bruno API collection files.
+
+TASK:
+Analyze the C# controller code and extract each API endpoint. For each endpoint, create a Bruno API request file.
+
+IMPORTANT OUTPUT FORMAT:
+Your response must be valid JSON in the following format:
+{
+  "endpoints": [
+    {
+      "name": "Endpoint name", 
+      "method": "GET|POST|PUT|DELETE|etc",
+      "path": "Full relative path including route prefix",
+      "auth": "none|bearer|inherit",
+      "contentType": "application/json|etc",
+      "description": "Brief description of the endpoint",
+      "bodyExample": "Example body or null if no body needed",
+      "bruFile": "Complete Bruno file content for this endpoint (MUST BE TEXT, NOT JSON)"
+    }
+  ]
+}
+
+BRUNO FILE FORMAT FOR 'bruFile' FIELD:
+Each 'bruFile' field MUST contain ONLY the raw text content matching this structure:
+
+meta {
+  name: [Endpoint Name]
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}[PATH]
+  auth: none
+}
+
+post {
+  url: {{baseUrl}}[PATH]
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  [BODY CONTENT]
+}
+
+RULES:
+1. Extract proper HTTP method from attributes like [HttpGet], [HttpPost], etc.
+2. HTTP methods in Bruno format MUST be lowercase (get, post, put, delete, etc.)
+3. Include the full route by combining the controller's [Route] attribute with the method's route.
+4. If [AllowAnonymous] is present, use "auth: none", otherwise use "auth: bearer". Include the bearer auth section if needed.
+5. For POST/PUT methods that accept a body, include a "body:json" section with the content from "bodyExample".
+6. Use {{baseUrl}} as the base URL variable in the request URL.
+7. Check for [Produces] attribute to determine content type (affects body section).
+8. DO NOT use the markdown format with \`\`\` in the bruFile field.
+9. Do NOT include example 
+
+ABSOLUTELY DO NOT wrap your response in markdown code blocks (like \`\`\`json).
+Return ONLY the raw JSON object. Do not include ANY introductory text, preamble, or explanation like "Here is the JSON output:". Your response must start directly with "{" and end directly with "}".
+THE 'bruFile' FIELD MUST CONTAIN A STRING WITH THE BRUNO TEXT FORMAT, NOT A JSON STRING. DO NOT INCLUDE ANYTHING OTHER THAN THE JSON OUTPUT.`;
 
 /**
  * Save generated Bruno request files to the collection
